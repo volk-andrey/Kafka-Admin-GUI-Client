@@ -20,12 +20,11 @@ public class KafkaAdminPanel extends JPanel {
     private JLabel statusLabel;
     private AdminClient adminClient;
 
-    private JTabbedPane mainTabbedPane; // Добавляем JTabbedPane
+    private JTabbedPane mainTabbedPane;
 
-    // Панели для различных функций (пока объявим, реализуем позже)
-    private JPanel topicsPanel;
-    private JPanel aclPanel;
-    private JPanel partitionsPanel; // Для просмотра партиций, возможно, интегрируем в topicsPanel
+    // Объявляем нашу панель топиков
+    private TopicsPanel topicsPanel;
+    private JPanel aclPanel; // Пока оставим как JPanel, реализуем позже
 
     public KafkaAdminPanel() {
         setLayout(new BorderLayout());
@@ -39,7 +38,6 @@ public class KafkaAdminPanel extends JPanel {
         connectionPanel.add(bootstrapServersField);
 
         connectButton = new JButton("Connect");
-        // При подключении, мы хотим активировать вкладки
         connectButton.addActionListener(e -> connectToKafka());
         connectionPanel.add(connectButton);
 
@@ -50,21 +48,19 @@ public class KafkaAdminPanel extends JPanel {
 
         // --- Основное содержимое: JTabbedPane ---
         mainTabbedPane = new JTabbedPane();
-        mainTabbedPane.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5)); // Небольшие отступы
+        mainTabbedPane.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-        // Инициализируем панели вкладок (пока они пустые, но позже будут содержать функционал)
-        topicsPanel = new JPanel();
-        topicsPanel.add(new JLabel("Topic management goes here")); // Заглушка
+        // Инициализируем TopicsPanel
+        topicsPanel = new TopicsPanel();
         mainTabbedPane.addTab("Topics", topicsPanel);
 
         aclPanel = new JPanel();
-        aclPanel.add(new JLabel("ACL management goes here")); // Заглушка
+        aclPanel.add(new JLabel("ACL management goes here"));
         mainTabbedPane.addTab("ACLs", aclPanel);
 
-        // По умолчанию вкладки будут отключены, пока не будет успешного подключения
-        setTabsEnabled(false);
+        setTabsEnabled(false); // По умолчанию вкладки отключены
 
-        add(mainTabbedPane, BorderLayout.CENTER); // Добавляем JTabbedPane в центр панели
+        add(mainTabbedPane, BorderLayout.CENTER);
     }
 
     /**
@@ -78,8 +74,8 @@ public class KafkaAdminPanel extends JPanel {
         }
 
         statusLabel.setText("Status: Connecting...");
-        connectButton.setEnabled(false); // Отключаем кнопку во время попытки подключения
-        setTabsEnabled(false); // Отключаем вкладки во время попытки подключения
+        connectButton.setEnabled(false);
+        setTabsEnabled(false);
 
         new SwingWorker<Boolean, Void>() {
             @Override
@@ -88,13 +84,11 @@ public class KafkaAdminPanel extends JPanel {
                 props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
 
                 try {
-                    // Если AdminClient уже существует и подключен, закроем его перед переподключением
                     if (adminClient != null) {
                         adminClient.close();
                         adminClient = null;
                     }
                     adminClient = AdminClient.create(props);
-                    // Проверяем подключение
                     adminClient.describeCluster().nodes().get();
                     log.info("Successfully connected to Kafka cluster at: {}", bootstrapServers);
                     return true;
@@ -115,43 +109,38 @@ public class KafkaAdminPanel extends JPanel {
                     if (success) {
                         statusLabel.setText("Status: Connected to " + bootstrapServers);
                         JOptionPane.showMessageDialog(KafkaAdminPanel.this, "Successfully connected to Kafka!", "Connection Success", JOptionPane.INFORMATION_MESSAGE);
-                        setTabsEnabled(true); // Включаем вкладки после успешного подключения
-                        // TODO: Здесь будем загружать данные в панели (например, список топиков)
+                        setTabsEnabled(true);
+                        // После успешного подключения передаем AdminClient в TopicsPanel
+                        topicsPanel.setAdminClient(adminClient);
+                        // Можем переключиться на вкладку топиков по умолчанию
+                        mainTabbedPane.setSelectedComponent(topicsPanel);
                     }
                 } catch (InterruptedException | ExecutionException ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     statusLabel.setText("Status: Connection Failed!");
                     JOptionPane.showMessageDialog(KafkaAdminPanel.this, "Failed to connect to Kafka: " + cause.getMessage(), "Connection Error", JOptionPane.ERROR_MESSAGE);
-                    setTabsEnabled(false); // В случае ошибки оставляем вкладки отключенными
+                    setTabsEnabled(false);
                 } finally {
-                    connectButton.setEnabled(true); // Включаем кнопку обратно
+                    connectButton.setEnabled(true);
                 }
             }
         }.execute();
     }
 
-    /**
-     * Метод для включения/выключения вкладок.
-     * @param enabled true для включения, false для выключения.
-     */
     private void setTabsEnabled(boolean enabled) {
         for (int i = 0; i < mainTabbedPane.getTabCount(); i++) {
             mainTabbedPane.setEnabledAt(i, enabled);
         }
+        // Когда вкладки включаются, вызываем fetchTopics() на TopicsPanel
+        if (enabled && topicsPanel != null && adminClient != null) {
+            topicsPanel.fetchTopics();
+        }
     }
 
-    /**
-     * Метод для получения текущего AdminClient.
-     * Другие панели будут использовать его для взаимодействия с Kafka.
-     * @return AdminClient или null, если не подключено.
-     */
     public AdminClient getAdminClient() {
         return adminClient;
     }
 
-    /**
-     * Метод для закрытия AdminClient при завершении работы приложения.
-     */
     public void closeAdminClient() {
         if (adminClient != null) {
             adminClient.close();
