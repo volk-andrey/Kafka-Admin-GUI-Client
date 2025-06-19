@@ -1,5 +1,6 @@
 package com.mycompany.kafkaadmin;
 
+import com.mycompany.kafkaadmin.dialog.ConnectionSettingsDialog;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 
@@ -15,27 +16,28 @@ public class KafkaAdminPanel extends JPanel {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaAdminPanel.class);
 
-    private JTextField bootstrapServersField;
     private JButton connectButton;
+    private JButton connectionSettingsButton;
     private JLabel statusLabel;
     private AdminClient adminClient;
 
     private JTabbedPane mainTabbedPane;
 
-    // Объявляем нашу панель топиков
     private TopicsPanel topicsPanel;
-    private JPanel aclPanel; // Пока оставим как JPanel, реализуем позже
+    private AclPanel aclPanel;
+
+    private Properties currentConnectionProps;
 
     public KafkaAdminPanel() {
         setLayout(new BorderLayout());
 
         // --- Панель подключения ---
         JPanel connectionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        connectionPanel.setBorder(BorderFactory.createTitledBorder("Kafka Connection"));
+        connectionPanel.setBorder(BorderFactory.createTitledBorder("Kafka Connection")); // ИСПРАВЛЕНО: BorderBorderFactory -> BorderFactory
 
-        connectionPanel.add(new JLabel("Bootstrap Servers:"));
-        bootstrapServersField = new JTextField("localhost:9092", 25);
-        connectionPanel.add(bootstrapServersField);
+        connectionSettingsButton = new JButton("Connection Settings");
+        connectionSettingsButton.addActionListener(e -> showConnectionSettingsDialog());
+        connectionPanel.add(connectionSettingsButton);
 
         connectButton = new JButton("Connect");
         connectButton.addActionListener(e -> connectToKafka());
@@ -50,45 +52,100 @@ public class KafkaAdminPanel extends JPanel {
         mainTabbedPane = new JTabbedPane();
         mainTabbedPane.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-        // Инициализируем TopicsPanel
         topicsPanel = new TopicsPanel();
         mainTabbedPane.addTab("Topics", topicsPanel);
 
-        aclPanel = new JPanel();
-        aclPanel.add(new JLabel("ACL management goes here"));
+        aclPanel = new AclPanel();
         mainTabbedPane.addTab("ACLs", aclPanel);
 
-        setTabsEnabled(false); // По умолчанию вкладки отключены
+        setTabsEnabled(false);
 
         add(mainTabbedPane, BorderLayout.CENTER);
+
+        currentConnectionProps = new Properties();
+        currentConnectionProps.put("bootstrap.servers", "localhost:9092");
+        statusLabel.setText("Ready to connect to " + currentConnectionProps.getProperty("bootstrap.servers"));
     }
+
+    /**
+     * Показывает диалоговое окно для настройки подключения.
+     */
+    private void showConnectionSettingsDialog() {
+        // ИСПРАВЛЕНО: Преобразование Window в Frame
+        Window window = SwingUtilities.getWindowAncestor(this);
+        Frame ownerFrame = null;
+        if (window instanceof Frame) {
+            ownerFrame = (Frame) window;
+        }
+        // Если родительское окно не Frame, можно передать null или найти Frame выше
+        ConnectionSettingsDialog dialog = new ConnectionSettingsDialog(ownerFrame);
+
+
+        String currentBootstrap = currentConnectionProps.getProperty("bootstrap.servers", "");
+        if (!currentBootstrap.isEmpty()) dialog.bootstrapServersField.setText(currentBootstrap);
+
+        String securityProtocol = currentConnectionProps.getProperty("security.protocol", "PLAINTEXT");
+        dialog.securityProtocolComboBox.setSelectedItem(securityProtocol);
+
+        if (securityProtocol.startsWith("SASL_")) {
+            String jaasConfig = currentConnectionProps.getProperty("sasl.jaas.config", "");
+            if (jaasConfig.contains("username=\"") && jaasConfig.contains("password=\"")) {
+                int userStart = jaasConfig.indexOf("username=\"") + "username=\"".length();
+                int userEnd = jaasConfig.indexOf("\"", userStart);
+                String username = jaasConfig.substring(userStart, userEnd);
+                dialog.saslUsernameField.setText(username);
+
+                int passStart = jaasConfig.indexOf("password=\"") + "password=\"".length();
+                int passEnd = jaasConfig.indexOf("\"", passStart);
+                String password = jaasConfig.substring(passStart, passEnd);
+                dialog.saslPasswordField.setText(password);
+            }
+        }
+
+        if (securityProtocol.endsWith("_SSL") || securityProtocol.equals("SSL")) {
+            dialog.sslTruststoreLocationField.setText(currentConnectionProps.getProperty("ssl.truststore.location", ""));
+            dialog.sslTruststorePasswordField.setText(currentConnectionProps.getProperty("ssl.truststore.password", ""));
+            dialog.sslKeystoreLocationField.setText(currentConnectionProps.getProperty("ssl.keystore.location", ""));
+            dialog.sslKeystorePasswordField.setText(currentConnectionProps.getProperty("ssl.keystore.password", ""));
+        }
+
+        dialog.setVisible(true);
+
+        if (dialog.isConfirmed()) {
+            Properties newProps = dialog.getKafkaConnectionProperties();
+            if (newProps != null) {
+                this.currentConnectionProps = newProps;
+                statusLabel.setText("Connection settings updated. Ready to connect to " + currentConnectionProps.getProperty("bootstrap.servers"));
+            }
+        }
+    }
+
 
     /**
      * Метод для подключения к Kafka кластеру.
      */
     private void connectToKafka() {
-        String bootstrapServers = bootstrapServersField.getText().trim();
-        if (bootstrapServers.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Bootstrap Servers cannot be empty!", "Connection Error", JOptionPane.ERROR_MESSAGE);
+        if (currentConnectionProps == null || currentConnectionProps.isEmpty() || !currentConnectionProps.containsKey("bootstrap.servers")) {
+            JOptionPane.showMessageDialog(this, "Please configure connection settings first!", "Connection Error", JOptionPane.ERROR_MESSAGE);
+            showConnectionSettingsDialog();
             return;
         }
 
-        statusLabel.setText("Status: Connecting...");
+        String bootstrapServers = currentConnectionProps.getProperty("bootstrap.servers");
+        statusLabel.setText("Status: Connecting to " + bootstrapServers + "...");
         connectButton.setEnabled(false);
+        connectionSettingsButton.setEnabled(false);
         setTabsEnabled(false);
 
         new SwingWorker<Boolean, Void>() {
             @Override
             protected Boolean doInBackground() throws Exception {
-                Properties props = new Properties();
-                props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-
                 try {
                     if (adminClient != null) {
                         adminClient.close();
                         adminClient = null;
                     }
-                    adminClient = AdminClient.create(props);
+                    adminClient = AdminClient.create(currentConnectionProps);
                     adminClient.describeCluster().nodes().get();
                     log.info("Successfully connected to Kafka cluster at: {}", bootstrapServers);
                     return true;
@@ -110,9 +167,8 @@ public class KafkaAdminPanel extends JPanel {
                         statusLabel.setText("Status: Connected to " + bootstrapServers);
                         JOptionPane.showMessageDialog(KafkaAdminPanel.this, "Successfully connected to Kafka!", "Connection Success", JOptionPane.INFORMATION_MESSAGE);
                         setTabsEnabled(true);
-                        // После успешного подключения передаем AdminClient в TopicsPanel
                         topicsPanel.setAdminClient(adminClient);
-                        // Можем переключиться на вкладку топиков по умолчанию
+                        aclPanel.setAdminClient(adminClient);
                         mainTabbedPane.setSelectedComponent(topicsPanel);
                     }
                 } catch (InterruptedException | ExecutionException ex) {
@@ -122,6 +178,7 @@ public class KafkaAdminPanel extends JPanel {
                     setTabsEnabled(false);
                 } finally {
                     connectButton.setEnabled(true);
+                    connectionSettingsButton.setEnabled(true);
                 }
             }
         }.execute();
@@ -131,9 +188,13 @@ public class KafkaAdminPanel extends JPanel {
         for (int i = 0; i < mainTabbedPane.getTabCount(); i++) {
             mainTabbedPane.setEnabledAt(i, enabled);
         }
-        // Когда вкладки включаются, вызываем fetchTopics() на TopicsPanel
-        if (enabled && topicsPanel != null && adminClient != null) {
-            topicsPanel.fetchTopics();
+        if (enabled && adminClient != null) {
+            if (topicsPanel != null) {
+                topicsPanel.fetchTopics();
+            }
+            if (aclPanel != null) {
+                aclPanel.fetchAcls();
+            }
         }
     }
 
