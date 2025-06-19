@@ -1,31 +1,41 @@
 package com.mycompany.kafkaadmin.dialog;
 
+import com.mycompany.kafkaadmin.cluster.ClusterConfig;
+
 import javax.swing.*;
 import java.awt.*;
-import java.util.HashMap;
-import java.util.Map;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.Properties;
 
 public class ConnectionSettingsDialog extends JDialog {
 
-    public JTextField bootstrapServersField;
-    public JComboBox<String> securityProtocolComboBox;
-    public JTextField saslUsernameField;
-    public JPasswordField saslPasswordField;
-    public JTextField sslTruststoreLocationField;
-    public JPasswordField sslTruststorePasswordField;
-    public JTextField sslKeystoreLocationField;
-    public JPasswordField sslKeystorePasswordField;
-    private JLabel statusLabel;
+    private JTextField configNameField; // Новое поле для имени конфигурации
+    JTextField bootstrapServersField;
+    JComboBox<String> securityProtocolComboBox;
+    JTextField saslUsernameField;
+    JPasswordField saslPasswordField;
+    JTextField sslTruststoreLocationField;
+    JPasswordField sslTruststorePasswordField;
+    JTextField sslKeystoreLocationField;
+    JPasswordField sslKeystorePasswordField;
 
-    private boolean confirmed = false; // Флаг, был ли диалог подтвержден (OK)
+    private boolean confirmed = false;
+    private ClusterConfig currentConfig; // Для редактирования существующей конфигурации
 
     public ConnectionSettingsDialog(Frame owner) {
-        super(owner, "Kafka Connection Settings", true); // Модальное окно
+        this(owner, null); // Вызов основного конструктора без начальной конфигурации
+    }
+
+    public ConnectionSettingsDialog(Frame owner, ClusterConfig configToEdit) {
+        super(owner, "Kafka Connection Settings", true);
         setLayout(new BorderLayout(10, 10));
         setResizable(false);
 
-        // --- Главная панель для ввода данных ---
+        this.currentConfig = configToEdit;
+
         JPanel inputPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
@@ -33,11 +43,18 @@ public class ConnectionSettingsDialog extends JDialog {
 
         int row = 0;
 
+        // Config Name (новое поле)
+        gbc.gridx = 0; gbc.gridy = row; gbc.anchor = GridBagConstraints.WEST;
+        inputPanel.add(new JLabel("Configuration Name:"), gbc);
+        gbc.gridx = 1; gbc.gridy = row++; gbc.weightx = 1.0;
+        configNameField = new JTextField(30);
+        inputPanel.add(configNameField, gbc);
+
         // Bootstrap Servers
         gbc.gridx = 0; gbc.gridy = row; gbc.anchor = GridBagConstraints.WEST;
         inputPanel.add(new JLabel("Bootstrap Servers:"), gbc);
         gbc.gridx = 1; gbc.gridy = row++; gbc.weightx = 1.0;
-        bootstrapServersField = new JTextField("localhost:9092", 30);
+        bootstrapServersField = new JTextField(30);
         inputPanel.add(bootstrapServersField, gbc);
 
         // Security Protocol
@@ -93,7 +110,6 @@ public class ConnectionSettingsDialog extends JDialog {
 
         add(inputPanel, BorderLayout.CENTER);
 
-        // --- Панель с кнопками ОК и Отмена ---
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         JButton okButton = new JButton("OK");
         okButton.addActionListener(e -> {
@@ -112,16 +128,54 @@ public class ConnectionSettingsDialog extends JDialog {
 
         add(buttonPanel, BorderLayout.SOUTH);
 
-        // Изначально обновляем видимость полей
-        updateFieldsVisibility();
+        // Предзаполнение полей, если редактируется существующая конфигурация
+        if (currentConfig != null) {
+            populateFields(currentConfig);
+        } else {
+            // Если создаем новую, можно задать начальные значения
+            bootstrapServersField.setText("localhost:9092");
+            securityProtocolComboBox.setSelectedItem("PLAINTEXT");
+        }
 
-        pack(); // Подгоняем размер окна под содержимое
-        setLocationRelativeTo(owner); // Центрируем по отношению к родительскому окну
+        updateFieldsVisibility(); // Изначально обновляем видимость полей
+        pack();
+        setLocationRelativeTo(owner);
     }
 
-    /**
-     * Обновляет видимость полей в зависимости от выбранного протокола безопасности.
-     */
+    private void populateFields(ClusterConfig config) {
+        configNameField.setText(config.getName());
+        Properties props = config.getConnectionProperties();
+
+        bootstrapServersField.setText(props.getProperty("bootstrap.servers", ""));
+        securityProtocolComboBox.setSelectedItem(props.getProperty("security.protocol", "PLAINTEXT"));
+
+        String securityProtocol = (String) securityProtocolComboBox.getSelectedItem();
+
+        // Populate SASL fields
+        if (securityProtocol != null && securityProtocol.startsWith("SASL_")) {
+            String jaasConfig = props.getProperty("sasl.jaas.config", "");
+            if (jaasConfig.contains("username=\"") && jaasConfig.contains("password=\"")) {
+                int userStart = jaasConfig.indexOf("username=\"") + "username=\"".length();
+                int userEnd = jaasConfig.indexOf("\"", userStart);
+                String username = jaasConfig.substring(userStart, userEnd);
+                saslUsernameField.setText(username);
+
+                int passStart = jaasConfig.indexOf("password=\"") + "password=\"".length();
+                int passEnd = jaasConfig.indexOf("\"", passStart);
+                String password = jaasConfig.substring(passStart, passEnd);
+                saslPasswordField.setText(password);
+            }
+        }
+
+        // Populate SSL fields
+        if (securityProtocol != null && (securityProtocol.endsWith("_SSL") || securityProtocol.equals("SSL"))) {
+            sslTruststoreLocationField.setText(props.getProperty("ssl.truststore.location", ""));
+            sslTruststorePasswordField.setText(props.getProperty("ssl.truststore.password", ""));
+            sslKeystoreLocationField.setText(props.getProperty("ssl.keystore.location", ""));
+            sslKeystorePasswordField.setText(props.getProperty("ssl.keystore.password", ""));
+        }
+    }
+
     private void updateFieldsVisibility() {
         String selectedProtocol = (String) securityProtocolComboBox.getSelectedItem();
 
@@ -133,10 +187,9 @@ public class ConnectionSettingsDialog extends JDialog {
 
         sslTruststoreLocationField.setEnabled(isSsl);
         sslTruststorePasswordField.setEnabled(isSsl);
-        sslKeystoreLocationField.setEnabled(isSsl); // Keystore нужен только для клиентской аутентификации
-        sslKeystorePasswordField.setEnabled(isSsl); // Keystore нужен только для клиентской аутентификации
+        sslKeystoreLocationField.setEnabled(isSsl);
+        sslKeystorePasswordField.setEnabled(isSsl);
 
-        // Очищаем поля, если они отключены
         if (!isSasl) {
             saslUsernameField.setText("");
             saslPasswordField.setText("");
@@ -149,49 +202,50 @@ public class ConnectionSettingsDialog extends JDialog {
         }
     }
 
-    /**
-     * Возвращает true, если диалог был подтвержден кнопкой OK.
-     */
     public boolean isConfirmed() {
         return confirmed;
     }
 
     /**
-     * Собирает все введенные пользователем параметры в объект Properties,
-     * который можно передать в AdminClientConfig.
+     * Создает или обновляет ClusterConfig из введенных данных.
+     * Возвращает null, если есть ошибки валидации.
      */
-    public Properties getKafkaConnectionProperties() {
+    public ClusterConfig getClusterConfig() {
+        String configName = configNameField.getText().trim();
+        if (configName.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Configuration Name cannot be empty.", "Input Error", JOptionPane.ERROR_MESSAGE);
+            return null;
+        }
+
         Properties props = new Properties();
 
         String bootstrapServers = bootstrapServersField.getText().trim();
-        if (!bootstrapServers.isEmpty()) {
-            props.put("bootstrap.servers", bootstrapServers);
+        if (bootstrapServers.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Bootstrap Servers cannot be empty.", "Input Error", JOptionPane.ERROR_MESSAGE);
+            return null;
         }
+        props.put("bootstrap.servers", bootstrapServers);
 
         String securityProtocol = (String) securityProtocolComboBox.getSelectedItem();
-        if (securityProtocol != null && !securityProtocol.equals("PLAINTEXT")) { // PLAINTEXT - это по умолчанию, можно не указывать
+        if (securityProtocol != null && !securityProtocol.equals("PLAINTEXT")) {
             props.put("security.protocol", securityProtocol);
         }
 
-        // SASL Properties
         if (securityProtocol != null && securityProtocol.startsWith("SASL_")) {
             String username = saslUsernameField.getText().trim();
             String password = new String(saslPasswordField.getPassword()).trim();
             if (!username.isEmpty() && !password.isEmpty()) {
-                // Это минимальные настройки для SASL/PLAIN. Для других механизмов могут понадобиться дополнительные.
-                props.put("sasl.mechanism", "PLAIN"); // Или SCRAM-SHA-256, SCRAM-SHA-512
+                props.put("sasl.mechanism", "PLAIN"); // По умолчанию PLAIN
                 props.put("sasl.jaas.config", String.format(
                         "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"%s\" password=\"%s\";",
                         username, password
                 ));
             } else {
-                // Если выбран SASL, но поля пустые, это ошибка
                 JOptionPane.showMessageDialog(this, "SASL username and password are required for " + securityProtocol + ".", "Input Error", JOptionPane.ERROR_MESSAGE);
-                return null; // Возвращаем null, чтобы сигнализировать об ошибке
+                return null;
             }
         }
 
-        // SSL Properties
         if (securityProtocol != null && (securityProtocol.endsWith("_SSL") || securityProtocol.equals("SSL"))) {
             String truststoreLocation = sslTruststoreLocationField.getText().trim();
             String truststorePassword = new String(sslTruststorePasswordField.getPassword()).trim();
@@ -201,18 +255,46 @@ public class ConnectionSettingsDialog extends JDialog {
             if (!truststoreLocation.isEmpty()) {
                 props.put("ssl.truststore.location", truststoreLocation);
                 props.put("ssl.truststore.password", truststorePassword);
+
+                // Дополнительная проверка на существование файла Truststore
+                try (InputStream is = new FileInputStream(truststoreLocation)) {
+                    // Просто пытаемся открыть, чтобы убедиться, что файл существует и доступен
+                } catch (FileNotFoundException e) {
+                    JOptionPane.showMessageDialog(this, "SSL Truststore file not found: " + truststoreLocation, "File Error", JOptionPane.ERROR_MESSAGE);
+                    return null;
+                } catch (IOException e) {
+                    JOptionPane.showMessageDialog(this, "Error accessing SSL Truststore file: " + truststoreLocation + "\n" + e.getMessage(), "File Error", JOptionPane.ERROR_MESSAGE);
+                    return null;
+                }
+
             } else {
                 JOptionPane.showMessageDialog(this, "SSL Truststore Location is required for " + securityProtocol + ".", "Input Error", JOptionPane.ERROR_MESSAGE);
                 return null;
             }
 
-            // Client authentication (optional)
             if (!keystoreLocation.isEmpty()) {
                 props.put("ssl.keystore.location", keystoreLocation);
                 props.put("ssl.keystore.password", keystorePassword);
+                try (InputStream is = new FileInputStream(keystoreLocation)) {
+                    // Просто пытаемся открыть, чтобы убедиться, что файл существует и доступен
+                } catch (FileNotFoundException e) {
+                    JOptionPane.showMessageDialog(this, "SSL Keystore file not found: " + keystoreLocation, "File Error", JOptionPane.ERROR_MESSAGE);
+                    return null;
+                } catch (IOException e) {
+                    JOptionPane.showMessageDialog(this, "Error accessing SSL Keystore file: " + keystoreLocation + "\n" + e.getMessage(), "File Error", JOptionPane.ERROR_MESSAGE);
+                    return null;
+                }
             }
-            // else, если keystoreLocation пуст, это не ошибка, просто нет клиентской аутентификации
         }
-        return props;
+
+        if (currentConfig != null) {
+            // Обновляем существующую конфигурацию
+            currentConfig.setName(configName);
+            currentConfig.setConnectionProperties(props);
+            return currentConfig;
+        } else {
+            // Создаем новую конфигурацию
+            return new ClusterConfig(configName, props);
+        }
     }
 }
