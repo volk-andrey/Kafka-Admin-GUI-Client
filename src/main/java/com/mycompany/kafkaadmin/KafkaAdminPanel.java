@@ -48,7 +48,8 @@ public class KafkaAdminPanel extends JPanel {
         configSelector.addActionListener(e -> {
             selectedConfig = (ClusterConfig) configSelector.getSelectedItem();
             if (selectedConfig != null) {
-                statusLabel.setText("Selected: " + selectedConfig.getName() + " (" + selectedConfig.getConnectionProperties().getProperty("bootstrap.servers", "") + ")");
+                statusLabel.setText("Selected: " + selectedConfig.getName() + " ("
+                        + selectedConfig.getConnectionProperties().getProperty("bootstrap.servers", "") + ")");
             } else {
                 statusLabel.setText("No configuration selected.");
             }
@@ -66,7 +67,8 @@ public class KafkaAdminPanel extends JPanel {
             if (selected != null) {
                 addOrEditConfig(selected); // Редактирование выбранного
             } else {
-                JOptionPane.showMessageDialog(this, "Please select a configuration to edit.", "No Selection", JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Please select a configuration to edit.", "No Selection",
+                        JOptionPane.INFORMATION_MESSAGE);
             }
         });
         connectionPanel.add(editConfigButton);
@@ -118,8 +120,11 @@ public class KafkaAdminPanel extends JPanel {
     }
 
     /**
-     * Открывает диалог для добавления новой или редактирования существующей конфигурации.
-     * @param configToEdit Конфигурация для редактирования, или null для добавления новой.
+     * Открывает диалог для добавления новой или редактирования существующей
+     * конфигурации.
+     * 
+     * @param configToEdit Конфигурация для редактирования, или null для добавления
+     *                     новой.
      */
     private void addOrEditConfig(ClusterConfig configToEdit) {
         Window window = SwingUtilities.getWindowAncestor(this);
@@ -136,10 +141,12 @@ public class KafkaAdminPanel extends JPanel {
             if (newOrUpdatedConfig != null) {
                 if (configToEdit == null) { // Добавление новой
                     configManager.addConfig(newOrUpdatedConfig);
-                    JOptionPane.showMessageDialog(this, "Configuration '" + newOrUpdatedConfig.getName() + "' added.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                    JOptionPane.showMessageDialog(this, "Configuration '" + newOrUpdatedConfig.getName() + "' added.",
+                            "Success", JOptionPane.INFORMATION_MESSAGE);
                 } else { // Обновление существующей
                     configManager.updateConfig(newOrUpdatedConfig);
-                    JOptionPane.showMessageDialog(this, "Configuration '" + newOrUpdatedConfig.getName() + "' updated.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                    JOptionPane.showMessageDialog(this, "Configuration '" + newOrUpdatedConfig.getName() + "' updated.",
+                            "Success", JOptionPane.INFORMATION_MESSAGE);
                 }
                 loadAndDisplayConfigs(); // Перезагружаем список в JComboBox
                 configSelector.setSelectedItem(newOrUpdatedConfig); // Выбираем добавленную/обновленную
@@ -153,7 +160,8 @@ public class KafkaAdminPanel extends JPanel {
     private void removeSelectedConfig() {
         ClusterConfig selected = (ClusterConfig) configSelector.getSelectedItem();
         if (selected == null) {
-            JOptionPane.showMessageDialog(this, "Please select a configuration to remove.", "No Selection", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Please select a configuration to remove.", "No Selection",
+                    JOptionPane.INFORMATION_MESSAGE);
             return;
         }
 
@@ -175,13 +183,13 @@ public class KafkaAdminPanel extends JPanel {
         }
     }
 
-
     /**
      * Метод для подключения к Kafka кластеру.
      */
     private void connectToKafka() {
         if (selectedConfig == null) {
-            JOptionPane.showMessageDialog(this, "Please select a cluster configuration or add a new one.", "Connection Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Please select a cluster configuration or add a new one.",
+                    "Connection Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
 
@@ -224,16 +232,23 @@ public class KafkaAdminPanel extends JPanel {
                     boolean success = get();
                     if (success) {
                         statusLabel.setText("Status: Connected to " + selectedConfig.getName());
-                        JOptionPane.showMessageDialog(KafkaAdminPanel.this, "Successfully connected to Kafka!", "Connection Success", JOptionPane.INFORMATION_MESSAGE);
-                        setTabsEnabled(true);
+                        JOptionPane.showMessageDialog(KafkaAdminPanel.this, "Successfully connected to Kafka!",
+                                "Connection Success", JOptionPane.INFORMATION_MESSAGE);
+
+                        // Сначала устанавливаем adminClient в панели
                         topicsPanel.setAdminClient(adminClient);
                         aclPanel.setAdminClient(adminClient);
+
+                        // Затем включаем вкладки (это вызовет fetchTopics и fetchAcls)
+                        setTabsEnabled(true);
                         mainTabbedPane.setSelectedComponent(topicsPanel);
                     }
                 } catch (InterruptedException | ExecutionException ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     statusLabel.setText("Status: Connection Failed!");
-                    JOptionPane.showMessageDialog(KafkaAdminPanel.this, "Failed to connect to Kafka: " + cause.getMessage(), "Connection Error", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(KafkaAdminPanel.this,
+                            "Failed to connect to Kafka: " + cause.getMessage(), "Connection Error",
+                            JOptionPane.ERROR_MESSAGE);
                     setTabsEnabled(false);
                 } finally {
                     connectButton.setEnabled(true);
@@ -249,14 +264,6 @@ public class KafkaAdminPanel extends JPanel {
     private void setTabsEnabled(boolean enabled) {
         for (int i = 0; i < mainTabbedPane.getTabCount(); i++) {
             mainTabbedPane.setEnabledAt(i, enabled);
-        }
-        if (enabled && adminClient != null) {
-            if (topicsPanel != null) {
-                topicsPanel.fetchTopics();
-            }
-            if (aclPanel != null) {
-                aclPanel.fetchAcls();
-            }
         }
     }
 
