@@ -36,3 +36,4 @@ build/
 
 ### Mac OS ###
 .DS_Store
+/kafka_cluster_configs.json

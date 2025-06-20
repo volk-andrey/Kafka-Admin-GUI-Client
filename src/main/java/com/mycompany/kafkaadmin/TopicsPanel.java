@@ -31,6 +31,8 @@ public class TopicsPanel extends JPanel {
     private JButton deleteTopicButton;
     private JButton alterTopicConfigsButton;
     private JButton viewPartitionsButton; // Кнопка для просмотра партиций
+    private JTextField topicFilterField; // Поле фильтрации топиков
+    private JLabel filterStatusLabel; // Счетчик отфильтрованных топиков
 
     // Панель для детальной информации/действий с топиками
     private JPanel topicDetailsPanel;
@@ -38,26 +40,76 @@ public class TopicsPanel extends JPanel {
     private DefaultTableModel partitionsTableModel; // Модель для таблицы партиций
     private JTable partitionsTable; // Таблица для партиций
 
+    // Данные для фильтрации
+    private List<Object[]> allTopicsData = new ArrayList<>(); // Храним все данные топиков
+
     public TopicsPanel() {
         setLayout(new BorderLayout(10, 10)); // Добавляем отступы между компонентами
 
-        // --- Верхняя панель с кнопками ---
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        // --- Верхняя панель с кнопками и фильтром ---
+        JPanel buttonPanel = new JPanel(new BorderLayout(5, 5));
+
+        // Панель с кнопками
+        JPanel buttonsPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         refreshTopicsButton = new JButton("Refresh Topics");
         createTopicButton = new JButton("Create Topic");
         deleteTopicButton = new JButton("Delete Topic");
         alterTopicConfigsButton = new JButton("Alter Configs");
         viewPartitionsButton = new JButton("View Partitions");
 
-        buttonPanel.add(refreshTopicsButton);
-        buttonPanel.add(createTopicButton);
-        buttonPanel.add(deleteTopicButton);
-        buttonPanel.add(alterTopicConfigsButton);
-        buttonPanel.add(viewPartitionsButton);
+        buttonsPanel.add(refreshTopicsButton);
+        buttonsPanel.add(createTopicButton);
+        buttonsPanel.add(deleteTopicButton);
+        buttonsPanel.add(alterTopicConfigsButton);
+        buttonsPanel.add(viewPartitionsButton);
+
+        // Панель с фильтром
+        JPanel filterPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        filterPanel.add(new JLabel("Фильтр топиков:"));
+        topicFilterField = new JTextField(20);
+        topicFilterField.setToolTipText("Введите часть имени топика для фильтрации");
+
+        // Кнопка очистки фильтра
+        JButton clearFilterButton = new JButton("✕");
+        clearFilterButton.setToolTipText("Очистить фильтр");
+        clearFilterButton.setPreferredSize(new Dimension(25, 25));
+        clearFilterButton.addActionListener(e -> {
+            topicFilterField.setText("");
+            filterTopics();
+        });
+
+        // Счетчик отфильтрованных топиков
+        filterStatusLabel = new JLabel("Всего: 0");
+        filterStatusLabel.setForeground(Color.GRAY);
+
+        // Добавляем слушатель для автоматической фильтрации
+        topicFilterField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                filterTopics();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                filterTopics();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                filterTopics();
+            }
+        });
+
+        filterPanel.add(topicFilterField);
+        filterPanel.add(clearFilterButton);
+        filterPanel.add(filterStatusLabel);
+
+        buttonPanel.add(buttonsPanel, BorderLayout.WEST);
+        buttonPanel.add(filterPanel, BorderLayout.EAST);
         add(buttonPanel, BorderLayout.NORTH);
 
         // --- Таблица топиков ---
-        String[] topicColumnNames = {"Topic Name", "Partitions", "Replicas"};
+        String[] topicColumnNames = { "Topic Name", "Partitions", "Replicas" };
         topicsTableModel = new DefaultTableModel(topicColumnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -87,7 +139,7 @@ public class TopicsPanel extends JPanel {
         // Таблица для партиций
         JPanel partitionsPanel = new JPanel(new BorderLayout());
         partitionsPanel.setBorder(BorderFactory.createTitledBorder("Partitions Info"));
-        String[] partitionColumnNames = {"Partition", "Leader", "Replicas", "In-Sync Replicas (ISR)"};
+        String[] partitionColumnNames = { "Partition", "Leader", "Replicas", "In-Sync Replicas (ISR)" };
         partitionsTableModel = new DefaultTableModel(partitionColumnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -108,12 +160,14 @@ public class TopicsPanel extends JPanel {
         alterTopicConfigsButton.addActionListener(e -> showAlterTopicConfigsDialog());
         viewPartitionsButton.addActionListener(e -> viewSelectedTopicPartitions());
 
-        // Изначально кнопки управления топиками должны быть неактивны, пока топик не выбран
+        // Изначально кнопки управления топиками должны быть неактивны, пока топик не
+        // выбран
         updateButtonStates();
     }
 
     /**
      * Устанавливает AdminClient для этой панели. Вызывается из KafkaAdminPanel.
+     * 
      * @param adminClient
      */
     public void setAdminClient(AdminClient adminClient) {
@@ -123,7 +177,8 @@ public class TopicsPanel extends JPanel {
     }
 
     /**
-     * Обновляет состояние кнопок в зависимости от того, выбрана ли строка в таблице топиков.
+     * Обновляет состояние кнопок в зависимости от того, выбрана ли строка в таблице
+     * топиков.
      */
     private void updateButtonStates() {
         boolean topicSelected = topicsTable.getSelectedRow() != -1;
@@ -139,6 +194,36 @@ public class TopicsPanel extends JPanel {
     }
 
     /**
+     * Фильтрует топики по введенному тексту в поле фильтрации.
+     */
+    private void filterTopics() {
+        String filterText = topicFilterField.getText().toLowerCase().trim();
+
+        // Очищаем таблицу
+        topicsTableModel.setRowCount(0);
+
+        // Фильтруем данные
+        int filteredCount = 0;
+        for (Object[] topicData : allTopicsData) {
+            String topicName = (String) topicData[0];
+            if (filterText.isEmpty() || topicName.toLowerCase().contains(filterText)) {
+                topicsTableModel.addRow(topicData);
+                filteredCount++;
+            }
+        }
+
+        // Обновляем счетчик
+        if (filterText.isEmpty()) {
+            filterStatusLabel.setText("Всего: " + allTopicsData.size());
+        } else {
+            filterStatusLabel.setText("Найдено: " + filteredCount + " из " + allTopicsData.size());
+        }
+
+        // Обновляем состояние кнопок
+        updateButtonStates();
+    }
+
+    /**
      * Загружает список топиков из Kafka и отображает их в таблице.
      */
     public void fetchTopics() {
@@ -148,10 +233,11 @@ public class TopicsPanel extends JPanel {
             return;
         }
 
-        // Очищаем таблицу перед загрузкой новых данных
+        // Очищаем таблицу и данные перед загрузкой новых данных
         topicsTableModel.setRowCount(0);
         partitionsTableModel.setRowCount(0);
         topicConfigArea.setText("");
+        allTopicsData.clear(); // Очищаем данные для фильтрации
 
         refreshTopicsButton.setEnabled(false); // Отключаем кнопку на время загрузки
         statusMessage("Loading topics...", JOptionPane.INFORMATION_MESSAGE);
@@ -169,6 +255,8 @@ public class TopicsPanel extends JPanel {
             protected void done() {
                 try {
                     Map<String, TopicDescription> topicDescriptions = get();
+
+                    // Сохраняем все данные для фильтрации
                     for (TopicDescription description : topicDescriptions.values()) {
                         String topicName = description.name();
                         int partitions = description.partitions().size();
@@ -178,8 +266,14 @@ public class TopicsPanel extends JPanel {
                         if (!description.partitions().isEmpty()) {
                             replicas = description.partitions().get(0).replicas().size();
                         }
-                        topicsTableModel.addRow(new Object[]{topicName, partitions, replicas});
+
+                        Object[] topicData = new Object[] { topicName, partitions, replicas };
+                        allTopicsData.add(topicData);
                     }
+
+                    // Применяем текущий фильтр (если есть)
+                    filterTopics();
+
                     statusMessage("Topics loaded successfully.", JOptionPane.INFORMATION_MESSAGE);
                 } catch (InterruptedException | ExecutionException ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
@@ -202,42 +296,21 @@ public class TopicsPanel extends JPanel {
             return;
         }
 
-        JTextField topicNameField = new JTextField(20);
-        JTextField partitionsField = new JTextField("1", 5);
-        JTextField replicationFactorField = new JTextField("1", 5);
+        // Получаем родительское окно
+        Window window = SwingUtilities.getWindowAncestor(this);
+        Frame ownerFrame = null;
+        if (window instanceof Frame) {
+            ownerFrame = (Frame) window;
+        }
 
-        JPanel panel = new JPanel(new GridLayout(0, 2, 5, 5));
-        panel.add(new JLabel("Topic Name:"));
-        panel.add(topicNameField);
-        panel.add(new JLabel("Partitions:"));
-        panel.add(partitionsField);
-        panel.add(new JLabel("Replication Factor:"));
-        panel.add(replicationFactorField);
+        // Используем новый диалог создания топика с передачей AdminClient
+        com.mycompany.kafkaadmin.dialog.CreateTopicDialog dialog = new com.mycompany.kafkaadmin.dialog.CreateTopicDialog(
+                ownerFrame, adminClient);
+        dialog.setVisible(true);
 
-        int result = JOptionPane.showConfirmDialog(this, panel, "Create New Topic",
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-
-        if (result == JOptionPane.OK_OPTION) {
-            String topicName = topicNameField.getText().trim();
-            int partitions;
-            short replicationFactor;
-
-            if (topicName.isEmpty()) {
-                JOptionPane.showMessageDialog(this, "Topic name cannot be empty!", "Input Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            try {
-                partitions = Integer.parseInt(partitionsField.getText());
-                replicationFactor = Short.parseShort(replicationFactorField.getText());
-                if (partitions <= 0 || replicationFactor <= 0) {
-                    JOptionPane.showMessageDialog(this, "Partitions and Replication Factor must be positive integers.", "Input Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-            } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(this, "Invalid number for partitions or replication factor.", "Input Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            createTopic(topicName, partitions, replicationFactor);
+        if (dialog.isConfirmed()) {
+            NewTopic newTopic = dialog.createNewTopic();
+            createTopic(newTopic);
         }
     }
 
@@ -246,6 +319,14 @@ public class TopicsPanel extends JPanel {
      */
     private void createTopic(String topicName, int partitions, short replicationFactor) {
         NewTopic newTopic = new NewTopic(topicName, partitions, replicationFactor);
+        createTopic(newTopic);
+    }
+
+    /**
+     * Отправляет запрос на создание топика в Kafka с конфигурацией.
+     */
+    private void createTopic(NewTopic newTopic) {
+        String topicName = newTopic.name();
         statusMessage("Creating topic: " + topicName + "...", JOptionPane.INFORMATION_MESSAGE);
         createTopicButton.setEnabled(false);
 
@@ -288,7 +369,8 @@ public class TopicsPanel extends JPanel {
 
         int selectedRow = topicsTable.getSelectedRow();
         if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "Please select a topic to delete.", "No Topic Selected", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Please select a topic to delete.", "No Topic Selected",
+                    JOptionPane.WARNING_MESSAGE);
             return;
         }
 
@@ -312,12 +394,14 @@ public class TopicsPanel extends JPanel {
                 protected void done() {
                     try {
                         get();
-                        statusMessage("Topic '" + topicName + "' deleted successfully!", JOptionPane.INFORMATION_MESSAGE);
+                        statusMessage("Topic '" + topicName + "' deleted successfully!",
+                                JOptionPane.INFORMATION_MESSAGE);
                         fetchTopics(); // Обновляем список
                     } catch (InterruptedException | ExecutionException ex) {
                         Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                         log.error("Error deleting topic '{}': {}", topicName, cause.getMessage(), cause);
-                        statusMessage("Error deleting topic '" + topicName + "': " + cause.getMessage(), JOptionPane.ERROR_MESSAGE);
+                        statusMessage("Error deleting topic '" + topicName + "': " + cause.getMessage(),
+                                JOptionPane.ERROR_MESSAGE);
                     } finally {
                         deleteTopicButton.setEnabled(true); // Включаем кнопку
                     }
@@ -337,7 +421,8 @@ public class TopicsPanel extends JPanel {
 
         int selectedRow = topicsTable.getSelectedRow();
         if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "Please select a topic to alter its configurations.", "No Topic Selected", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Please select a topic to alter its configurations.",
+                    "No Topic Selected", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
@@ -351,8 +436,7 @@ public class TopicsPanel extends JPanel {
             @Override
             protected Map<String, ConfigEntry> doInBackground() throws Exception {
                 DescribeConfigsResult describeConfigsResult = adminClient.describeConfigs(
-                        Collections.singletonList(new ConfigResource(ConfigResource.Type.TOPIC, topicName))
-                );
+                        Collections.singletonList(new ConfigResource(ConfigResource.Type.TOPIC, topicName)));
                 return describeConfigsResult.all().get().get(new ConfigResource(ConfigResource.Type.TOPIC, topicName))
                         .entries().stream().collect(Collectors.toMap(ConfigEntry::name, entry -> entry));
             }
@@ -362,7 +446,7 @@ public class TopicsPanel extends JPanel {
                 try {
                     Map<String, ConfigEntry> currentConfigs = get();
                     // Создаем JTable для отображения и редактирования настроек
-                    String[] configColumnNames = {"Configuration Name", "Current Value", "New Value"};
+                    String[] configColumnNames = { "Configuration Name", "Current Value", "New Value" };
                     DefaultTableModel configTableModel = new DefaultTableModel(configColumnNames, 0) {
                         @Override
                         public boolean isCellEditable(int row, int column) {
@@ -370,17 +454,19 @@ public class TopicsPanel extends JPanel {
                         }
                     };
 
-//                    for (ConfigEntry entry : currentConfigs.values()) {
-//                        // Исключаем настройки, которые нельзя изменять
-//                        if (entry.source() != ConfigEntry.ConfigSource.STATIC_BROKER_CONFIG && // Не статические настройки брокера
-//                                entry.source() != ConfigEntry.ConfigSource.DEFAULT_CONFIG && // Не дефолтные
-//                                !entry.isReadOnly()) { // Не только для чтения
-//                            configTableModel.addRow(new Object[]{entry.name(), entry.value(), entry.value()}); // По умолчанию "New Value" равен "Current Value"
-//                        }
-//                    }
+                    // for (ConfigEntry entry : currentConfigs.values()) {
+                    // // Исключаем настройки, которые нельзя изменять
+                    // if (entry.source() != ConfigEntry.ConfigSource.STATIC_BROKER_CONFIG && // Не
+                    // статические настройки брокера
+                    // entry.source() != ConfigEntry.ConfigSource.DEFAULT_CONFIG && // Не дефолтные
+                    // !entry.isReadOnly()) { // Не только для чтения
+                    // configTableModel.addRow(new Object[]{entry.name(), entry.value(),
+                    // entry.value()}); // По умолчанию "New Value" равен "Current Value"
+                    // }
+                    // }
                     for (ConfigEntry entry : currentConfigs.values()) {
                         // Убираем фильтрацию временно
-                        configTableModel.addRow(new Object[]{
+                        configTableModel.addRow(new Object[] {
                                 entry.name(),
                                 entry.value() != null ? entry.value() : "null", // Обработка null-значений
                                 entry.value() != null ? entry.value() : "null"
@@ -410,13 +496,15 @@ public class TopicsPanel extends JPanel {
                         if (!configsToAlter.isEmpty()) {
                             alterTopicConfigs(topicName, configsToAlter);
                         } else {
-                            statusMessage("No configuration changes detected for topic '" + topicName + "'.", JOptionPane.INFORMATION_MESSAGE);
+                            statusMessage("No configuration changes detected for topic '" + topicName + "'.",
+                                    JOptionPane.INFORMATION_MESSAGE);
                         }
                     }
                 } catch (InterruptedException | ExecutionException ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     log.error("Error loading configurations for topic '{}': {}", topicName, cause.getMessage(), cause);
-                    statusMessage("Error loading configurations for topic '" + topicName + "': " + cause.getMessage(), JOptionPane.ERROR_MESSAGE);
+                    statusMessage("Error loading configurations for topic '" + topicName + "': " + cause.getMessage(),
+                            JOptionPane.ERROR_MESSAGE);
                 } finally {
                     alterTopicConfigsButton.setEnabled(true);
                 }
@@ -449,13 +537,16 @@ public class TopicsPanel extends JPanel {
             protected void done() {
                 try {
                     get();
-                    statusMessage("Configurations for topic '" + topicName + "' altered successfully!", JOptionPane.INFORMATION_MESSAGE);
-                    // После изменения настроек, можно обновить список топиков или хотя бы их конфиги
+                    statusMessage("Configurations for topic '" + topicName + "' altered successfully!",
+                            JOptionPane.INFORMATION_MESSAGE);
+                    // После изменения настроек, можно обновить список топиков или хотя бы их
+                    // конфиги
                     describeTopicConfigs(topicName); // Обновляем отображение настроек
                 } catch (InterruptedException | ExecutionException ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     log.error("Error altering configurations for topic '{}': {}", topicName, cause.getMessage(), cause);
-                    statusMessage("Error altering configurations for topic '" + topicName + "': " + cause.getMessage(), JOptionPane.ERROR_MESSAGE);
+                    statusMessage("Error altering configurations for topic '" + topicName + "': " + cause.getMessage(),
+                            JOptionPane.ERROR_MESSAGE);
                 } finally {
                     alterTopicConfigsButton.setEnabled(true);
                 }
@@ -478,8 +569,7 @@ public class TopicsPanel extends JPanel {
             @Override
             protected Map<String, ConfigEntry> doInBackground() throws Exception {
                 DescribeConfigsResult describeConfigsResult = adminClient.describeConfigs(
-                        Collections.singletonList(new ConfigResource(ConfigResource.Type.TOPIC, topicName))
-                );
+                        Collections.singletonList(new ConfigResource(ConfigResource.Type.TOPIC, topicName)));
                 return describeConfigsResult.all().get().get(new ConfigResource(ConfigResource.Type.TOPIC, topicName))
                         .entries().stream().collect(Collectors.toMap(ConfigEntry::name, entry -> entry));
             }
@@ -505,7 +595,8 @@ public class TopicsPanel extends JPanel {
                     topicConfigArea.setText(sb.toString());
                 } catch (InterruptedException | ExecutionException ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-                    log.error("Error describing configurations for topic '{}': {}", topicName, cause.getMessage(), cause);
+                    log.error("Error describing configurations for topic '{}': {}", topicName, cause.getMessage(),
+                            cause);
                     topicConfigArea.setText("Error loading configs: " + cause.getMessage());
                 }
             }
@@ -523,7 +614,8 @@ public class TopicsPanel extends JPanel {
 
         int selectedRow = topicsTable.getSelectedRow();
         if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "Please select a topic to view partitions.", "No Topic Selected", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Please select a topic to view partitions.", "No Topic Selected",
+                    JOptionPane.WARNING_MESSAGE);
             return;
         }
 
@@ -558,7 +650,7 @@ public class TopicsPanel extends JPanel {
                                     .map(String::valueOf)
                                     .collect(Collectors.joining(", "));
 
-                            partitionsTableModel.addRow(new Object[]{
+                            partitionsTableModel.addRow(new Object[] {
                                     partition.partition(),
                                     leader,
                                     replicas,
@@ -582,13 +674,15 @@ public class TopicsPanel extends JPanel {
         }.execute();
     }
 
-
     /**
-     * Вспомогательный метод для отображения сообщений статуса в всплывающем окне и в логах.
+     * Вспомогательный метод для отображения сообщений статуса в всплывающем окне и
+     * в логах.
      */
     private void statusMessage(String message, int messageType) {
-        // Мы могли бы использовать JLabel для статуса, но для демонстрации JOptionPane достаточно.
-        // JOptionPane.showMessageDialog(this, message, "Info", messageType); // Слишком много всплывающих окон
+        // Мы могли бы использовать JLabel для статуса, но для демонстрации JOptionPane
+        // достаточно.
+        // JOptionPane.showMessageDialog(this, message, "Info", messageType); // Слишком
+        // много всплывающих окон
         log.info("Status Update: {}", message);
     }
 }
